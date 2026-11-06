@@ -1,11 +1,12 @@
 """Kalshi Sports +EV Scanner (Streamlit)."""
 import math
 from collections import defaultdict
-from difflib import SequenceMatcher
 
 import pandas as pd
 import requests
 import streamlit as st
+
+from matching import match_market
 
 KALSHI = "https://api.elections.kalshi.com/trade-api/v2"
 ODDS = "https://api.the-odds-api.com/v4"
@@ -86,32 +87,10 @@ def fetch_consensus(sport_key, api_key):
     return events, remaining
 
 
-# ---------- matching ----------
-def norm(s):
-    return "".join(c for c in s.lower() if c.isalnum() or c == " ")
-
-
-def team_in_text(team, text):
-    toks = [t for t in norm(team).split() if len(t) > 3]
-    return bool(toks) and sum(t in text for t in toks) >= max(1, len(toks) // 2)
-
-
-def match_market(m, events):
-    text = norm(m.get("title", "") + " " + m.get("yes_sub_title", ""))
-    sub = norm(m.get("yes_sub_title", ""))
-    for ev in events:
-        if team_in_text(ev["home"], text) and team_in_text(ev["away"], text):
-            best = max((ev["home"], ev["away"]),
-                       key=lambda t: SequenceMatcher(None, sub, norm(t)).ratio()
-                       + (0.5 if team_in_text(t, sub) else 0))
-            return ev, best
-    return None
-
-
-def scan(markets, events, min_ev, max_spread, bankroll, kelly_frac):
-    rows, matched = [], 0
+def scan(markets, events, min_ev, max_spread, max_gap, bankroll, kelly_frac):
+    rows, matched, suspicious = [], 0, 0
     for m in markets:
-        hit = match_market(m, events)
+        hit, _ = match_market(m, events)
         if not hit:
             continue
         matched += 1
@@ -124,6 +103,9 @@ def scan(markets, events, min_ev, max_spread, bankroll, kelly_frac):
             continue
         for side, price, p in (("YES", yes_ask, fair_yes), ("NO", no_ask, 1 - fair_yes)):
             if not price or not 0.02 < price < 0.98:
+                continue
+            if abs(p - price) > max_gap:  # almost always a bad match or stale line
+                suspicious += 1
                 continue
             e = ev_per_contract(p, price)
             if e >= min_ev:
@@ -141,7 +123,7 @@ def scan(markets, events, min_ev, max_spread, bankroll, kelly_frac):
     df = pd.DataFrame(rows)
     if not df.empty:
         df = df.sort_values("EV / contract", ascending=False).reset_index(drop=True)
-    return df, matched
+    return df, matched, suspicious
 
 
 # ---------- UI ----------
@@ -152,8 +134,10 @@ st.caption("Compares Kalshi prices to the devigged sportsbook consensus, net of 
 with st.sidebar:
     st.header("Settings")
     sport = st.selectbox("Sport", list(SPORTS))
-    min_ev = st.slider("Min EV per $1 contract", 0.0, 0.10, 0.01, 0.005, format="%.3f")
-    max_spread = st.slider("Max bid/ask spread ($)", 0.01, 0.20, 0.06, 0.01)
+    min_ev = st.slider("Min EV per $1 contract", 0.0, 0.10, 0.02, 0.005, format="%.3f")
+    max_spread = st.slider("Max bid/ask spread ($)", 0.01, 0.20, 0.04, 0.01)
+    max_gap = st.slider("Max price vs. fair gap", 0.05, 0.50, 0.15, 0.01,
+                        help="Edges bigger than this are hidden as likely bad matches or stale lines.")
     bankroll = st.number_input("Bankroll ($)", 100, 1_000_000, 1000, 100)
     kelly_frac = st.slider("Kelly fraction", 0.05, 1.0, 0.25, 0.05)
     api_key = st.secrets.get("ODDS_API_KEY", "") or st.text_input(
@@ -174,13 +158,16 @@ except requests.HTTPError as e:
     st.error(f"API error: {e}")
     st.stop()
 
-df, matched = scan(markets, events, min_ev, max_spread, bankroll, kelly_frac)
+df, matched, suspicious = scan(markets, events, min_ev, max_spread, max_gap, bankroll, kelly_frac)
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Kalshi markets", len(markets))
 c2.metric("Sportsbook games", len(events))
 c3.metric("Matched markets", matched)
 c4.metric("Odds API credits left", remaining)
+
+if suspicious:
+    st.caption(f"⚠️ Hid {suspicious} edge(s) larger than the max gap as likely mismatches or stale lines.")
 
 if df.empty:
     st.warning("No +EV edges above your threshold right now.")
@@ -197,10 +184,15 @@ else:
 with st.expander("Matching check: Kalshi markets vs. sportsbook games"):
     rows = []
     for m in markets:
-        hit = match_market(m, events)
-        rows.append({"Kalshi": f"{m.get('title','')} | {m.get('yes_sub_title','')}",
-                     "Matched to": f"{hit[0]['away']} @ {hit[0]['home']} → {hit[1]}" if hit else "—"})
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        hit, reason = match_market(m, events)
+        rows.append({"Kalshi market": f"{m.get('title','')} | YES = {m.get('yes_sub_title','')}",
+                     "Ticker": m["ticker"],
+                     "Matched to": f"{hit[0]['away']} @ {hit[0]['home']} (YES = {hit[1]})" if hit else "—",
+                     "Status": reason})
+    mdf = pd.DataFrame(rows)
+    if not mdf.empty:
+        mdf = mdf.sort_values("Status", key=lambda c: c != "ok")
+    st.dataframe(mdf, use_container_width=True, hide_index=True)
 
 st.caption("Not financial advice. Verify matches and live prices before trading. "
            "Stale sportsbook lines can look like edges.")

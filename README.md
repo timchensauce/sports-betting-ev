@@ -1,6 +1,6 @@
 # Kalshi Sports +EV Scanner
 
-Streamlit app that compares Kalshi game-winner prices to the devigged sportsbook
+Streamlit app (`streamlit_app.py` + `matching.py`) that compares Kalshi game-winner prices to the devigged sportsbook
 consensus (The Odds API) and flags +EV contracts net of Kalshi fees, with fractional-Kelly sizing.
 
 ## Run locally
