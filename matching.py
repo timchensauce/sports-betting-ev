@@ -25,9 +25,9 @@ def ticker_date(m):
 
 
 def event_dates(ev):
-    """Possible local (US) calendar dates for a UTC start time."""
+    """Possible local US calendar dates (ET..PT) for a UTC start time. Never the raw UTC date."""
     start = datetime.fromisoformat(ev["start"].replace("Z", "+00:00"))
-    return {(start - timedelta(hours=h)).date() for h in (0, 4, 5, 6, 7, 8, 10)}
+    return {(start - timedelta(hours=h)).date() for h in (4, 5, 6, 7, 8)}
 
 
 def resolve(name, ev):
@@ -62,24 +62,54 @@ def split_title(title):
     return parts if len(parts) == 2 else None
 
 
-def match_market(m, events):
+TIE = {"tie", "draw"}
+
+
+def build_siblings(markets):
+    """event_ticker -> team labels of every contract in that Kalshi event (the two sides of the game)."""
+    sib = {}
+    for m in markets:
+        et = m.get("event_ticker") or m["ticker"].rsplit("-", 1)[0]
+        name = m.get("yes_sub_title", "")
+        if name and norm(name) and " ".join(norm(name)) not in TIE:
+            sib.setdefault(et, []).append(name)
+    return sib
+
+
+def opponent_ok(m, ev, team, siblings):
+    """Both sides of the Kalshi game must map to the two different teams of this sportsbook game."""
+    et = m.get("event_ticker") or m["ticker"].rsplit("-", 1)[0]
+    names = (siblings or {}).get(et, [])
+    if len(names) >= 2:
+        resolved = {resolve(n, ev) for n in names}
+        return None not in resolved and resolved == {ev["home"], ev["away"]}
+    parts = split_title(m.get("title", ""))
+    if parts:
+        a, b = resolve(parts[0], ev), resolve(parts[1], ev)
+        return bool(a and b and a != b and team in (a, b))
+    return False  # can't verify the opponent -> don't trade it
+
+
+def match_market(m, events, siblings=None):
     """Returns ((event, yes_team), "ok") or (None, reason)."""
     d = ticker_date(m)
     if not d:
         return None, "no date in ticker"
-    sub, parts = m.get("yes_sub_title", ""), split_title(m.get("title", ""))
-    cands = []
+    sub = m.get("yes_sub_title", "")
+    cands, name_date_hits = [], 0
     for ev in events:
         if d not in event_dates(ev):
             continue
         team = resolve(sub, ev)
         if not team:
             continue
-        if parts:  # both teams in the title must map to the two different teams of this game
-            a, b = resolve(parts[0], ev), resolve(parts[1], ev)
-            if not a or not b or a == b or team not in (a, b):
-                continue
-        cands.append((ev, team))
+        name_date_hits += 1
+        if opponent_ok(m, ev, team, siblings):
+            cands.append((ev, team))
     if len(cands) == 1:
         return cands[0], "ok"
-    return None, "ambiguous (multiple games)" if cands else "no sportsbook game with same date + teams"
+    if cands:
+        return None, "ambiguous (multiple games)"
+    if name_date_hits:
+        return None, "team+date match but opponent doesn't (or can't be verified)"
+    return None, "no sportsbook game with same date + team"

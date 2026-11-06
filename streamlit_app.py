@@ -6,7 +6,7 @@ import pandas as pd
 import requests
 import streamlit as st
 
-from matching import match_market
+from matching import build_siblings, match_market
 
 KALSHI = "https://api.elections.kalshi.com/trade-api/v2"
 ODDS = "https://api.the-odds-api.com/v4"
@@ -88,9 +88,10 @@ def fetch_consensus(sport_key, api_key):
 
 
 def scan(markets, events, min_ev, max_spread, max_gap, bankroll, kelly_frac):
+    sib = build_siblings(markets)
     rows, matched, suspicious = [], 0, 0
     for m in markets:
-        hit, _ = match_market(m, events)
+        hit, _ = match_market(m, events, sib)
         if not hit:
             continue
         matched += 1
@@ -182,9 +183,9 @@ else:
     })
 
 with st.expander("Matching check: Kalshi markets vs. sportsbook games"):
-    rows = []
+    rows, sib = [], build_siblings(markets)
     for m in markets:
-        hit, reason = match_market(m, events)
+        hit, reason = match_market(m, events, sib)
         rows.append({"Kalshi market": f"{m.get('title','')} | YES = {m.get('yes_sub_title','')}",
                      "Ticker": m["ticker"],
                      "Matched to": f"{hit[0]['away']} @ {hit[0]['home']} (YES = {hit[1]})" if hit else "—",
