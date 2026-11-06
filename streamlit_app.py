@@ -23,12 +23,12 @@ SPORTS = {
 BOOK_WEIGHT = {
     "pinnacle": 2.0, "lowvig": 1.0,                                   # sharp / low-margin
     "draftkings": 1.0, "fanduel": 1.0, "betmgm": 1.0, "williamhill_us": 1.0, "caesars": 1.0,
-    "betrivers": 1.0, "espnbet": 1.0, "thescore": 1.0, "fanatics": 1.0, "hardrockbet": 1.0,
+    "betrivers": 1.0, "bet365": 1.0, "espnbet": 1.0, "thescore": 1.0, "fanatics": 1.0, "hardrockbet": 1.0,
     "ballybet": 0.75, "betparx": 0.75, "unibet_us": 0.75, "superbook": 0.75,
     "bovada": 0.5, "betonlineag": 0.5, "mybookieag": 0.5, "betus": 0.5,  # softer offshore lines
 }
 BOOK_NAMES = {"pinnacle": "Pinnacle", "lowvig": "LowVig", "draftkings": "DraftKings", "fanduel": "FanDuel",
-              "betmgm": "BetMGM", "williamhill_us": "Caesars", "caesars": "Caesars", "betrivers": "BetRivers",
+              "betmgm": "BetMGM", "williamhill_us": "Caesars", "caesars": "Caesars", "betrivers": "BetRivers", "bet365": "Bet365",
               "espnbet": "ESPN BET", "thescore": "theScore", "fanatics": "Fanatics", "hardrockbet": "Hard Rock",
               "ballybet": "Bally", "betparx": "betPARX", "unibet_us": "Unibet", "superbook": "SuperBook",
               "bovada": "Bovada", "betonlineag": "BetOnline", "mybookieag": "MyBookie", "betus": "BetUS"}
