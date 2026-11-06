@@ -16,5 +16,5 @@ streamlit run streamlit_app.py
 3. **Advanced settings → Secrets**, paste: `ODDS_API_KEY = "your_key"`
 4. Deploy.
 
-Free Odds API tier is 500 credits/month; the app caches sportsbook data for 5 minutes.
+Free Odds API tier is 500 credits/month. Each refresh costs 3 credits with extra books on (us, us2, eu), 2 with them off; sportsbook data is cached for 5 minutes.
 Read-only: places no orders. Not financial advice.

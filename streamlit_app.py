@@ -20,8 +20,18 @@ SPORTS = {
     "NCAAF": ("KXNCAAFGAME", "americanfootball_ncaaf"),
     "NCAAB": ("KXNCAAMBGAME", "basketball_ncaab"),
 }
-BOOK_WEIGHT = {"pinnacle": 2.0, "draftkings": 1.0, "fanduel": 1.0,
-               "betmgm": 1.0, "caesars": 1.0, "betrivers": 1.0}
+BOOK_WEIGHT = {
+    "pinnacle": 2.0, "lowvig": 1.0,                                   # sharp / low-margin
+    "draftkings": 1.0, "fanduel": 1.0, "betmgm": 1.0, "williamhill_us": 1.0, "caesars": 1.0,
+    "betrivers": 1.0, "espnbet": 1.0, "thescore": 1.0, "fanatics": 1.0, "hardrockbet": 1.0,
+    "ballybet": 0.75, "betparx": 0.75, "unibet_us": 0.75, "superbook": 0.75,
+    "bovada": 0.5, "betonlineag": 0.5, "mybookieag": 0.5, "betus": 0.5,  # softer offshore lines
+}
+BOOK_NAMES = {"pinnacle": "Pinnacle", "lowvig": "LowVig", "draftkings": "DraftKings", "fanduel": "FanDuel",
+              "betmgm": "BetMGM", "williamhill_us": "Caesars", "caesars": "Caesars", "betrivers": "BetRivers",
+              "espnbet": "ESPN BET", "thescore": "theScore", "fanatics": "Fanatics", "hardrockbet": "Hard Rock",
+              "ballybet": "Bally", "betparx": "betPARX", "unibet_us": "Unibet", "superbook": "SuperBook",
+              "bovada": "Bovada", "betonlineag": "BetOnline", "mybookieag": "MyBookie", "betus": "BetUS"}
 ORDER = {"🟢 Strong": 0, "🟡 Marginal": 1, "🔴 Skip": 2}
 
 
@@ -73,9 +83,9 @@ def fetch_depth(ticker, side, ask):
 
 
 @st.cache_data(ttl=300, show_spinner=False)  # 5 min cache protects API credits
-def fetch_consensus(sport_key, api_key):
+def fetch_consensus(sport_key, api_key, regions):
     r = requests.get(f"{ODDS}/sports/{sport_key}/odds", timeout=20, params={
-        "apiKey": api_key, "regions": "us,eu", "markets": "h2h", "oddsFormat": "decimal"})
+        "apiKey": api_key, "regions": regions, "markets": "h2h", "oddsFormat": "decimal"})
     r.raise_for_status()
     remaining = r.headers.get("x-requests-remaining", "?")
     now, events = datetime.now(timezone.utc), []
@@ -125,8 +135,9 @@ def scan(markets, events, min_ev, max_spread, max_gap, bankroll, kelly_frac):
                 suspicious += 1
                 continue
             if p - price - kalshi_fee(price, 100) / 100 >= min_ev:
-                bp = [b[team] if side == "YES" else 1 - b[team] for b in ev["books"].values() if team in b]
-                cands.append((p - price, m, ev, team, side, price, p, bp))
+                used = [k for k, b in ev["books"].items() if team in b]
+                bp = [ev["books"][k][team] if side == "YES" else 1 - ev["books"][k][team] for k in used]
+                cands.append((p - price, m, ev, team, side, price, p, bp, used))
     cands.sort(key=lambda c: -c[0])
     seen, unique = set(), []          # "Team A YES" and "Team B NO" are the same bet: keep the better-priced one
     for c in cands:
@@ -137,12 +148,12 @@ def scan(markets, events, min_ev, max_spread, max_gap, bankroll, kelly_frac):
             seen.add(key)
             unique.append(c)
     cands, rows = unique, []
-    for _, m, ev, team, side, price, p, bp in cands[:20]:   # depth lookups only for the best 20
+    for _, m, ev, team, side, price, p, bp, used in cands[:20]:   # depth lookups only for the best 20
         depth = fetch_depth(m["ticker"], side, price)
         a = assess(p, bp, price, bankroll, kelly_frac, depth, min_ev)
         rows.append({"Verdict": a["verdict"], "Game": f"{ev['away']} @ {ev['home']}", "Bet": f"{team} {side}",
                      "Kalshi price": price, "Fair prob": p, "Books agree range": f"{a['p_low']:.0%} to {a['p_high']:.0%}",
-                     "# Books": a["n_books"], "EV / contract": a["ev"], "Buy (contracts)": a["contracts"],
+                     "# Books": a["n_books"], "Books used": ", ".join(sorted({BOOK_NAMES.get(k, k) for k in used})), "EV / contract": a["ev"], "Buy (contracts)": a["contracts"],
                      "Cost ($)": a["cost"], "Expected profit ($)": a["exp_profit"], "Why": a["why"],
                      "Start": et(ev["start"]), "Ticker": m["ticker"]})
     df = pd.DataFrame(rows)
@@ -166,6 +177,8 @@ with st.sidebar:
     max_spread = st.slider("Max bid/ask spread ($)", 0.01, 0.20, 0.04, 0.01)
     max_gap = st.slider("Max price vs. fair gap", 0.05, 0.50, 0.15, 0.01,
                         help="Edges bigger than this are hidden as likely bad matches or stale lines.")
+    more_books = st.checkbox("Include extra books (us2 region)", value=True,
+                             help="Adds ESPN BET, Fanatics, Hard Rock, Bally etc. Costs 1 extra Odds API credit per refresh.")
     show_skips = st.checkbox("Show 🔴 Skip rows", value=False)
     api_key = st.secrets.get("ODDS_API_KEY", "") or st.text_input(
         "Odds API key", type="password", help="Free key at the-odds-api.com")
@@ -180,7 +193,7 @@ series, sport_key = SPORTS[sport]
 try:
     with st.spinner("Fetching Kalshi and sportsbook data..."):
         markets = fetch_kalshi(series)
-        events, remaining = fetch_consensus(sport_key, api_key)
+        events, remaining = fetch_consensus(sport_key, api_key, "us,us2,eu" if more_books else "us,eu")
         df, matched, suspicious = scan(markets, events, min_ev, max_spread, max_gap, bankroll, kelly_frac)
 except requests.HTTPError as e:
     st.error(f"API error: {e}")
